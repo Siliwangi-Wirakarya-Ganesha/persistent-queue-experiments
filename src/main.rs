@@ -1,12 +1,34 @@
+mod impl_queue_file;
+mod impl_rustbreak;
+
+use crate::impl_queue_file::QFQueue;
+use crate::impl_rustbreak::RBQueue;
 use bincode::{deserialize as de_binary, serialize as ser_binary};
 use chrono::{DateTime, FixedOffset, TimeZone};
-use rustbreak::{backend::FileBackend, deser::Bincode, Database, FileDatabase};
+use core::convert::AsRef;
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_yaml::to_string as to_yaml_string;
+use std::fmt::Display;
 use std::fs::{remove_file, OpenOptions};
-use std::io::{Read, Write};
+use std::io::{Read, Result as IOResult, Write};
+use std::path::Path;
+use std::string::ToString;
 
-const PERSISTENT_FILE: &str = "person.pq";
+const RBQ_FILE: &str = "person.rbq";
+const QFQ_FILE: &str = "person.qfq";
+
+pub trait IPersistentQueue<T, K = Self>
+where
+    T: DeserializeOwned + Serialize + Clone + Send,
+    Self: Sized,
+{
+    fn new<S: AsRef<Path> + ToString + Display + Clone>(path: S) -> IOResult<Self>;
+    fn enqueue(&mut self, data: T) -> IOResult<()>;
+    fn dequeue(&mut self) -> IOResult<Option<T>>;
+    fn count(&self) -> IOResult<usize>;
+    fn get_filename(&self) -> String;
+}
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Person {
@@ -53,41 +75,34 @@ fn person_serde_exp() {
     remove_file("person.bin").unwrap();
 }
 
-fn get_pq_count(db: &Database<Vec<Person>, FileBackend, Bincode>) -> usize {
-    db.read(|db| db.len()).unwrap()
-}
-
-fn person_pq_exp() {
-    println!("\"Person\" persistent queue...");
-    let person_pq =
-        FileDatabase::<Vec<Person>, Bincode>::load_from_path_or_default(PERSISTENT_FILE).unwrap();
-    println!("=> Current PQ count is {}", get_pq_count(&person_pq));
+fn person_exp<S>(pq: &mut S)
+where
+    S: IPersistentQueue<Person>,
+{
+    println!(
+        "\"Person\" persistent queue with filename: {}",
+        pq.get_filename()
+    );
+    println!("=> Current PQ count is {}", pq.count().unwrap());
     println!("=> Adding 2 same person to queue...");
-    person_pq
-        .write_safe(|db| {
-            let person_new = Person::new(
-                "Aditya Kresna",
-                FixedOffset::east(9 * 3600)
-                    .ymd(1984, 2, 10)
-                    .and_hms(7, 15, 0),
-            );
-            db.push(person_new.clone());
-            db.push(person_new.clone());
-        })
-        .unwrap();
-    person_pq.save().unwrap();
-    println!("=> Current PQ count is {}", get_pq_count(&person_pq));
+    let person_new = Person::new(
+        "Aditya Kresna",
+        FixedOffset::east(9 * 3600)
+            .ymd(1984, 2, 10)
+            .and_hms(7, 15, 0),
+    );
+    pq.enqueue(person_new.clone()).unwrap();
+    pq.enqueue(person_new.clone()).unwrap();
+    println!("=> Current PQ count is {}", pq.count().unwrap());
     println!("=> Removing 1 oldest person queue...");
-    person_pq
-        .write_safe(|db| {
-            db.remove(0);
-        })
-        .unwrap();
-    person_pq.save().unwrap();
-    println!("=> Current PQ count is {}", get_pq_count(&person_pq));
+    pq.dequeue().unwrap();
+    println!("=> Current PQ count is {}", pq.count().unwrap());
 }
 
 fn main() {
     person_serde_exp();
-    person_pq_exp();
+    let mut person_rbq = RBQueue::<Person>::new(RBQ_FILE).unwrap();
+    let mut person_qfq = QFQueue::<Person>::new(QFQ_FILE).unwrap();
+    person_exp(&mut person_rbq);
+    person_exp(&mut person_qfq);
 }

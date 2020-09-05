@@ -49,6 +49,7 @@ overflow-checks = false
 [dependencies]
 bincode = "1.3.1"
 chrono = { version = "0.4.15", features = ["serde"] }
+queue-file = "1.1.0"
 rustbreak = { version = "2.0.0", features = ["bin_enc", "yaml_enc"] }
 serde = { version = "1.0.115", features = ["std", "derive"] }
 serde_yaml = "0.8.13"
